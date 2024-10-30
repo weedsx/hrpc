@@ -105,23 +105,14 @@ func (server *Server) serveCodec(cc codec.Codec) {
 	_ = cc.Close()
 }
 
-func (server *Server) readRequestHeader(cc codec.Codec) (*codec.Header, error) {
-	var h codec.Header
-	if err := cc.ReadHeader(&h); err != nil {
-		if !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
-			log.Println("rpc server: read header error:", err)
-		}
-		return nil, err
-	}
-	return &h, nil
-}
-
 func (server *Server) readRequest(cc codec.Codec) (*request, error) {
 	header, err := server.readRequestHeader(cc)
 	if err != nil {
 		return nil, err
 	}
+
 	req := &request{h: header}
+
 	req.svc, req.mtype, err = server.findService(header.ServiceMethod)
 	if err != nil {
 		return nil, err
@@ -141,6 +132,17 @@ func (server *Server) readRequest(cc codec.Codec) (*request, error) {
 		return req, err
 	}
 	return req, nil
+}
+
+func (server *Server) readRequestHeader(cc codec.Codec) (*codec.Header, error) {
+	var h codec.Header
+	if err := cc.ReadHeader(&h); err != nil {
+		if !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
+			log.Println("rpc server: read header error:", err)
+		}
+		return nil, err
+	}
+	return &h, nil
 }
 
 // handleRequest 处理请求，返回响应

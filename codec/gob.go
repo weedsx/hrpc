@@ -31,6 +31,9 @@ func (c *GobCodec) Close() error {
 	return c.conn.Close()
 }
 
+// gob.Decoder 在解码时会智能地处理数据流，即使数据是以追加方式进行写入的。
+// gob 编解码器的设计允许它在流式数据中准确地解析出结构体。
+
 func (c *GobCodec) ReadHeader(header *Header) error {
 	return c.dec.Decode(header)
 }
