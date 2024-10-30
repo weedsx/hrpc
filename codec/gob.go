@@ -21,8 +21,9 @@ func NewGobCodec(conn io.ReadWriteCloser) Codec {
 	return &GobCodec{
 		conn: conn,
 		buf:  buf,
-		dec:  gob.NewDecoder(conn),
-		enc:  gob.NewEncoder(buf),
+		// 基于连接 conn 构造编解码器
+		dec: gob.NewDecoder(conn),
+		enc: gob.NewEncoder(buf),
 	}
 }
 
@@ -40,11 +41,13 @@ func (c *GobCodec) ReadBody(body interface{}) error {
 
 func (c *GobCodec) Write(header *Header, body interface{}) error {
 	defer func() {
+		// 将缓冲区中的数据实际写入到底层连接（conn）中，并发送请求
 		err := c.buf.Flush()
 		if err != nil {
 			_ = c.Close()
 		}
 	}()
+	// 编码成字节流，并写入 buf 缓冲区
 	if err := c.enc.Encode(header); err != nil {
 		log.Println("rpc codec: gob error encoding header:", err)
 		return err

@@ -116,6 +116,7 @@ func (client *Client) receive() {
 			err = client.cc.ReadBody(nil)
 			call.done()
 		default:
+			// 将返回的数据读取到 call.Reply
 			err = client.cc.ReadBody(call.Reply)
 			if err != nil {
 				call.Error = fmt.Errorf("reading body %s", err.Error())
