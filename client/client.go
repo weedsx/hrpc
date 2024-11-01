@@ -1,6 +1,7 @@
-package main
+package client
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"log"
 	"net"
 	"sync"
+	"time"
 )
 
 // Call 代表一个 RPC 调用
@@ -179,10 +181,17 @@ func (client *Client) Go(serviceMethod string, args, reply any, done chan *Call)
 }
 
 // Call 异步通过 Go 调用命名函数，等待它完成，并返回其错误状态。
-func (client *Client) Call(serviceMethod string, args, reply any) error {
+//
+// 用户可以使用 context.WithTimeout 创建具备超时检测能力的 context 对象来控制，超时则取消此次调用。
+func (client *Client) Call(ctx context.Context, serviceMethod string, args, reply any) error {
 	call := client.Go(serviceMethod, args, reply, make(chan *Call, 1))
-	done := <-call.Done
-	return done.Error
+	select {
+	case <-ctx.Done():
+		client.removeCall(call.Seq)
+		return errors.New("rpc client: call failed: " + ctx.Err().Error())
+	case call := <-call.Done:
+		return call.Error
+	}
 }
 
 // NewClient 创建并返回一个 Client 实例
@@ -216,24 +225,7 @@ func NewClient(conn net.Conn, opt *server.Option) (*Client, error) {
 
 // Dial 连接到指定网络地址的 RPC 服务器，返回客户端 Client
 func Dial(network, address string, opts ...*server.Option) (client *Client, err error) {
-	opt, err := parseOptions(opts...)
-	if err != nil {
-		return nil, err
-	}
-
-	dial, err := net.Dial(network, address)
-	if err != nil {
-		return nil, err
-	}
-
-	defer func() {
-		// 如果 client 为 nil，则关闭对应连接
-		if client == nil {
-			_ = dial.Close()
-		}
-	}()
-
-	return NewClient(dial, opt)
+	return dialTimeout(NewClient, network, address, opts...)
 }
 
 func parseOptions(opts ...*server.Option) (*server.Option, error) {
@@ -251,4 +243,51 @@ func parseOptions(opts ...*server.Option) (*server.Option, error) {
 		option.CodecType = server.DefaultOption.CodecType
 	}
 	return option, nil
+}
+
+// clientResult 用来保存 client 和 error，在用于处理超时创建 client 的 dialTimeout 使用
+type clientResult struct {
+	client *Client
+	err    error
+}
+
+type newClientFunc func(conn net.Conn, opt *server.Option) (client *Client, err error)
+
+// dialTimeout 封装了 dial，在创建 client （调用 NewClient）时加入超时处理
+func dialTimeout(f newClientFunc, network, address string, opts ...*server.Option) (*Client, error) {
+	opt, err := parseOptions(opts...)
+	if err != nil {
+		return nil, err
+	}
+
+	// 创建一个超时的 net.Conn
+	dial, err := net.DialTimeout(network, address, opt.ConnectTimeout)
+	if err != nil {
+		return nil, err
+	}
+
+	defer func() {
+		// 如果 client 为 nil，则关闭对应连接
+		if err != nil {
+			_ = dial.Close()
+		}
+	}()
+
+	clientResultCh := make(chan clientResult)
+	// 异步调用 NewClient 创建 client
+	go func() {
+		client, err := f(dial, opt)
+		clientResultCh <- clientResult{client: client, err: err}
+	}()
+	// ConnectTimeout 为 0 表示不做超时控制，直接返回
+	if opt.ConnectTimeout == 0 {
+		result := <-clientResultCh
+		return result.client, result.err
+	}
+	select {
+	case <-time.After(opt.ConnectTimeout):
+		return nil, fmt.Errorf("rpc client: connect timeout: expect within %s", opt.ConnectTimeout)
+	case result := <-clientResultCh:
+		return result.client, result.err
+	}
 }

@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"hrpc/codec"
 	"io"
 	"log"
@@ -78,14 +79,14 @@ func (server *Server) ServeConn(conn net.Conn) {
 		log.Printf("rpc server: invalid codec type %s", opt.CodecType)
 		return
 	}
-	server.serveCodec(codecFunc(conn))
+	server.serveCodec(codecFunc(conn), &opt)
 }
 
 // invalidRequest 是有错误发生时用于占位的空结构体
 var invalidRequest = struct{}{}
 
 // serveCodec 轮询读取请求，同步处理多个请求
-func (server *Server) serveCodec(cc codec.Codec) {
+func (server *Server) serveCodec(cc codec.Codec, opt *Option) {
 	sending := &sync.Mutex{}
 	wg := &sync.WaitGroup{}
 	for {
@@ -101,7 +102,7 @@ func (server *Server) serveCodec(cc codec.Codec) {
 		}
 		wg.Add(1)
 		// 处理请求
-		go server.handleRequest(cc, req, sending, wg)
+		go server.handleRequest(cc, req, sending, wg, opt.HandleTimeout)
 	}
 	wg.Wait()
 	_ = cc.Close()
@@ -148,17 +149,41 @@ func (server *Server) readRequestHeader(cc codec.Codec) (*codec.Header, error) {
 }
 
 // handleRequest 处理请求，返回响应
-func (server *Server) handleRequest(cc codec.Codec, req *request, sending *sync.Mutex, wg *sync.WaitGroup) {
+func (server *Server) handleRequest(cc codec.Codec, req *request, sending *sync.Mutex, wg *sync.WaitGroup, timeout time.Duration) {
 	defer wg.Done()
 
-	err := req.svc.call(req.mtype, req.argv, req.replyv)
-	if err != nil {
-		req.h.Err = err.Error()
-		server.sendResponse(cc, req.h, invalidRequest, sending)
+	sent := make(chan struct{})
+	var once sync.Once // 确保 sendResponse 仅调用一次
+
+	go func() {
+		err := req.svc.call(req.mtype, req.argv, req.replyv)
+		if err != nil {
+			req.h.Err = err.Error()
+			once.Do(func() {
+				server.sendResponse(cc, req.h, invalidRequest, sending)
+				sent <- struct{}{}
+			})
+			return
+		}
+		once.Do(func() {
+			server.sendResponse(cc, req.h, req.replyv.Interface(), sending)
+			sent <- struct{}{}
+		})
+	}()
+
+	if timeout == 0 {
+		<-sent
 		return
 	}
 
-	server.sendResponse(cc, req.h, req.replyv.Interface(), sending)
+	select {
+	case <-time.After(timeout):
+		once.Do(func() {
+			req.h.Err = fmt.Sprintf("rpc server: request handle timeout: expect within %s", timeout)
+			server.sendResponse(cc, req.h, invalidRequest, sending)
+		})
+	case <-sent:
+	}
 }
 
 // sendResponse 同步返回响应

@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	client2 "hrpc/client"
 	"hrpc/server"
 	"log"
 	"net"
@@ -27,7 +29,7 @@ func main() {
 	log.SetFlags(0)
 	addr := make(chan string)
 	go startServer(addr)
-	client, _ := Dial("tcp", <-addr)
+	client, _ := client2.Dial("tcp", <-addr)
 	defer func() { _ = client.Close() }()
 
 	time.Sleep(time.Second)
@@ -39,7 +41,8 @@ func main() {
 			defer wg.Done()
 			args := &server.Args{Num1: i, Num2: i * i}
 			var reply int
-			if err := client.Call("Foo.Sum", args, &reply); err != nil {
+			ctx, _ := context.WithTimeout(context.Background(), 5*time.Second)
+			if err := client.Call(ctx, "Foo.Sum", args, &reply); err != nil {
 				log.Fatal("call Foo.Sum error:", err)
 			}
 			log.Printf("[%v]: %d + %d = %d", i, args.Num1, args.Num2, reply)
