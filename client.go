@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"hrpc/codec"
+	"hrpc/server"
 	"io"
 	"log"
 	"net"
@@ -27,7 +28,7 @@ func (c *Call) done() {
 
 type Client struct {
 	cc       codec.Codec
-	opt      *Option
+	opt      *server.Option
 	sending  sync.Mutex       // sending 是一个互斥锁，和服务端类似，为了保证请求的有序发送，即防止出现多个请求报文混淆
 	header   codec.Header     // header 是每个请求的消息头，header 只有在请求发送时才需要，而请求发送是互斥的，因此每个客户端只需要一个，声明在 Client 结构体中可以复用
 	mu       sync.Mutex       // protect following
@@ -188,7 +189,7 @@ func (client *Client) Call(serviceMethod string, args, reply any) error {
 //
 // 首先需要完成一开始的协议交换，即发送 Option 信息给服务端。
 // 协商好消息的编解码方式之后，再创建一个子协程调用 receive() 接收响应。
-func NewClient(conn net.Conn, opt *Option) (*Client, error) {
+func NewClient(conn net.Conn, opt *server.Option) (*Client, error) {
 	codecFunc := codec.NewCodecFuncMap[opt.CodecType]
 	if codecFunc == nil {
 		err := fmt.Errorf("invalid codec type %s", opt.CodecType)
@@ -214,7 +215,7 @@ func NewClient(conn net.Conn, opt *Option) (*Client, error) {
 }
 
 // Dial 连接到指定网络地址的 RPC 服务器，返回客户端 Client
-func Dial(network, address string, opts ...*Option) (client *Client, err error) {
+func Dial(network, address string, opts ...*server.Option) (client *Client, err error) {
 	opt, err := parseOptions(opts...)
 	if err != nil {
 		return nil, err
@@ -235,9 +236,9 @@ func Dial(network, address string, opts ...*Option) (client *Client, err error) 
 	return NewClient(dial, opt)
 }
 
-func parseOptions(opts ...*Option) (*Option, error) {
+func parseOptions(opts ...*server.Option) (*server.Option, error) {
 	if len(opts) == 0 || opts[0] == nil {
-		return DefaultOption, nil
+		return server.DefaultOption, nil
 	}
 
 	if len(opts) != 1 {
@@ -245,9 +246,9 @@ func parseOptions(opts ...*Option) (*Option, error) {
 	}
 
 	option := opts[0]
-	option.MagicNumber = DefaultOption.MagicNumber
+	option.MagicNumber = server.DefaultOption.MagicNumber
 	if option.CodecType == "" {
-		option.CodecType = DefaultOption.CodecType
+		option.CodecType = server.DefaultOption.CodecType
 	}
 	return option, nil
 }
