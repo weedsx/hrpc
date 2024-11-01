@@ -2,8 +2,6 @@ package main
 
 import (
 	"context"
-	client2 "hrpc/client"
-	"hrpc/server"
 	"log"
 	"net"
 	"sync"
@@ -11,8 +9,8 @@ import (
 )
 
 func startServer(addr chan string) {
-	var foo server.Foo
-	if err := server.Register(&foo); err != nil {
+	var foo Foo
+	if err := Register(&foo); err != nil {
 		log.Fatal("register error:", err)
 	}
 	// pick a free port
@@ -22,14 +20,14 @@ func startServer(addr chan string) {
 	}
 	log.Println("start rpc server on", l.Addr())
 	addr <- l.Addr().String()
-	server.Accept(l)
+	Accept(l)
 }
 
 func main() {
 	log.SetFlags(0)
 	addr := make(chan string)
 	go startServer(addr)
-	client, _ := client2.Dial("tcp", <-addr)
+	client, _ := Dial("tcp", <-addr)
 	defer func() { _ = client.Close() }()
 
 	time.Sleep(time.Second)
@@ -39,7 +37,7 @@ func main() {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			args := &server.Args{Num1: i, Num2: i * i}
+			args := &Args{Num1: i, Num2: i * i}
 			var reply int
 			ctx, _ := context.WithTimeout(context.Background(), 5*time.Second)
 			if err := client.Call(ctx, "Foo.Sum", args, &reply); err != nil {

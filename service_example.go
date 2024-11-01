@@ -1,4 +1,4 @@
-package server
+package main
 
 type Foo int
 

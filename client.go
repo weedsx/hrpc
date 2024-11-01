@@ -1,4 +1,4 @@
-package client
+package main
 
 import (
 	"context"
@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"hrpc/codec"
-	"hrpc/server"
 	"io"
 	"log"
 	"net"
@@ -30,7 +29,7 @@ func (c *Call) done() {
 
 type Client struct {
 	cc       codec.Codec
-	opt      *server.Option
+	opt      *Option
 	sending  sync.Mutex       // sending 是一个互斥锁，和服务端类似，为了保证请求的有序发送，即防止出现多个请求报文混淆
 	header   codec.Header     // header 是每个请求的消息头，header 只有在请求发送时才需要，而请求发送是互斥的，因此每个客户端只需要一个，声明在 Client 结构体中可以复用
 	mu       sync.Mutex       // protect following
@@ -198,7 +197,7 @@ func (client *Client) Call(ctx context.Context, serviceMethod string, args, repl
 //
 // 首先需要完成一开始的协议交换，即发送 Option 信息给服务端。
 // 协商好消息的编解码方式之后，再创建一个子协程调用 receive() 接收响应。
-func NewClient(conn net.Conn, opt *server.Option) (*Client, error) {
+func NewClient(conn net.Conn, opt *Option) (*Client, error) {
 	codecFunc := codec.NewCodecFuncMap[opt.CodecType]
 	if codecFunc == nil {
 		err := fmt.Errorf("invalid codec type %s", opt.CodecType)
@@ -224,13 +223,13 @@ func NewClient(conn net.Conn, opt *server.Option) (*Client, error) {
 }
 
 // Dial 连接到指定网络地址的 RPC 服务器，返回客户端 Client
-func Dial(network, address string, opts ...*server.Option) (client *Client, err error) {
+func Dial(network, address string, opts ...*Option) (client *Client, err error) {
 	return dialTimeout(NewClient, network, address, opts...)
 }
 
-func parseOptions(opts ...*server.Option) (*server.Option, error) {
+func parseOptions(opts ...*Option) (*Option, error) {
 	if len(opts) == 0 || opts[0] == nil {
-		return server.DefaultOption, nil
+		return DefaultOption, nil
 	}
 
 	if len(opts) != 1 {
@@ -238,9 +237,9 @@ func parseOptions(opts ...*server.Option) (*server.Option, error) {
 	}
 
 	option := opts[0]
-	option.MagicNumber = server.DefaultOption.MagicNumber
+	option.MagicNumber = DefaultOption.MagicNumber
 	if option.CodecType == "" {
-		option.CodecType = server.DefaultOption.CodecType
+		option.CodecType = DefaultOption.CodecType
 	}
 	return option, nil
 }
@@ -251,10 +250,10 @@ type clientResult struct {
 	err    error
 }
 
-type newClientFunc func(conn net.Conn, opt *server.Option) (client *Client, err error)
+type newClientFunc func(conn net.Conn, opt *Option) (client *Client, err error)
 
 // dialTimeout 封装了 dial，在创建 client （调用 NewClient）时加入超时处理
-func dialTimeout(f newClientFunc, network, address string, opts ...*server.Option) (*Client, error) {
+func dialTimeout(f newClientFunc, network, address string, opts ...*Option) (*Client, error) {
 	opt, err := parseOptions(opts...)
 	if err != nil {
 		return nil, err
